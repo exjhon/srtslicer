@@ -59,8 +59,16 @@ std::vector<Subtitle> parseSrt(const std::string& filePath) {
     std::ifstream file(filePath);
     std::string line;
     while (std::getline(file, line)) {
+        if (line.empty()) continue; // Skip empty lines
+
         Subtitle subtitle;
-        subtitle.index = std::stoi(line);
+        try {
+            subtitle.index = std::stoi(line);
+        }
+        catch (const std::invalid_argument&) {
+            std::cerr << "Invalid subtitle index: " << line << std::endl;
+            continue;
+        }
         std::getline(file, line);
         std::istringstream timeStream(line);
         std::getline(timeStream, subtitle.startTime, ' ');
@@ -95,17 +103,37 @@ std::string escapeShellArg(const std::string& arg) {
     return escapedArg;
 }
 
+// Function to convert timestamp to milliseconds
+std::string timeToMilliseconds(const std::string& timeStr) {
+    int hours, minutes, seconds, milliseconds;
+    char dummy; // For consuming the ':' and ',' characters
+    std::stringstream timeStream(timeStr);
+    timeStream >> hours >> dummy >> minutes >> dummy >> seconds >> dummy >> milliseconds;
+
+    int totalMilliseconds = ((hours * 3600) + (minutes * 60) + seconds) * 1000 + milliseconds;
+    std::ostringstream oss;
+    oss << std::setw(9) << std::setfill('0') << totalMilliseconds; // Ensure 9 digits with leading zeros
+    return oss.str();
+}
+
 void splitWav(const std::string& wavPath, const std::vector<Subtitle>& subtitles) {
     std::string outputDir = wavPath.substr(0, wavPath.find_last_of("/\\"));
+    std::string baseFileName = wavPath.substr(wavPath.find_last_of("/\\") + 1);
+    baseFileName = baseFileName.substr(0, baseFileName.find_last_of('.')); // Remove the extension
     for (const auto& subtitle : subtitles) {
-        std::string outputFileName = outputDir + "/" + std::to_string(subtitle.index) + "_" + subtitle.text + ".wav";
+        std::string startTimeMs = timeToMilliseconds(subtitle.startTime);
+        std::string endTimeMs = timeToMilliseconds(subtitle.endTime);
+        std::string outputFileName = outputDir + "/" + baseFileName + "_" + std::to_string(subtitle.index) + "_" + startTimeMs + "_" + endTimeMs + "_" + subtitle.text + ".wav";
         outputFileName = utf8ToSystem(outputFileName); // Convert UTF-8 to system encoding if necessary
         std::string command = "ffmpeg -i " + escapeShellArg(wavPath) +
             " -ss " + subtitle.startTime +
             " -to " + subtitle.endTime +
             " -c copy " + escapeShellArg(outputFileName);
         std::cout << "Executing command: " << command << std::endl;
-        system(command.c_str());
+        int result = system(command.c_str());
+        if (result != 0) {
+            std::cerr << "Command failed with error code: " << result << std::endl;
+        }
     }
 }
 
